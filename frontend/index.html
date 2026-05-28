@@ -623,7 +623,7 @@
 // CONFIG — Firebase is used for real-time messaging only.
 // Auth, room CRUD, invites → Python Flask backend API.
 // ═══════════════════════════════════════════════════════════════
-const API_BASE = '';  // same origin; change to 'http://localhost:5000' for local dev
+const API_BASE = 'https://haaa-anfb.onrender.com';  // same origin; change to 'http://localhost:5000' for local dev
 
 const FIREBASE_CONFIG = {
   apiKey:      "AIzaSyDhY3ycgvTuNTebIQguq2gpNi9HbrMSCV4",
@@ -760,7 +760,7 @@ async function init(){
 
   // Init Socket.IO
   try{
-    socket=io({transports:['websocket','polling']});
+    socket=io('https://haaa-anfb.onrender.com',{transports:['websocket','polling']});
     socket.on('user_joined',d=>{if(d.roomId===currentRoom?.id)pushSystemMessage(`${d.user} joined`);});
     socket.on('user_left',d=>{if(d.roomId===currentRoom?.id)pushSystemMessage(`${d.user} left`);});
     socket.on('invite_received',d=>{if(d.targetUser===currentUser?.dbKey)showInviteToast(d);});
