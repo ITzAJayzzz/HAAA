@@ -27,7 +27,7 @@ CORS(app, resources={r"/api/*": {"origins": os.environ.get("ALLOWED_ORIGINS", "*
 socketio = SocketIO(
     app,
     cors_allowed_origins=os.environ.get("ALLOWED_ORIGINS", "*"),
-    async_mode="gevent",
+    async_mode="eventlet",
     logger=False,
     engineio_logger=False,
 )

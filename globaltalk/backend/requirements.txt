@@ -4,6 +4,5 @@ flask-cors==4.0.1
 flask-limiter==3.7.0
 firebase-admin==6.5.0
 python-dotenv==1.0.1
-gevent==24.2.1
-gevent-websocket==0.10.1
+eventlet
 gunicorn==22.0.0
