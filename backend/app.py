@@ -40,21 +40,27 @@ limiter = Limiter(
 )
 
 # ── Firebase init ──────────────────────────────────────────────────────────────
-FIREBASE_CRED_PATH = os.environ.get("FIREBASE_CRED_PATH", "serviceAccountKey.json")
+import json
+
 FIREBASE_DB_URL = os.environ.get(
     "FIREBASE_DB_URL",
     "https://taskperformance1-ba66d781-default-rtdb.firebaseio.com",
 )
 
+cred_json = os.environ.get("FIREBASE_CRED_JSON")
+if cred_json:
+    cred_dict = json.loads(cred_json)
+    cred = credentials.Certificate(cred_dict)
+else:
+    cred = credentials.Certificate("serviceAccountKey.json")
+
 _firebase_ready = False
 try:
-    cred = credentials.Certificate(FIREBASE_CRED_PATH)
     firebase_admin.initialize_app(cred, {"databaseURL": FIREBASE_DB_URL})
     _firebase_ready = True
     logger.info("Firebase Admin SDK initialised.")
 except Exception as e:
     logger.warning(f"Firebase Admin SDK not initialised (running without it): {e}")
-
 # ── Helpers ────────────────────────────────────────────────────────────────────
 SHORT_ID_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
