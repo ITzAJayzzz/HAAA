@@ -93,7 +93,7 @@ def send_email_code(to_email: str, code: str, purpose: str = "verification") -> 
         logger.warning("Brevo credentials not configured")
         return False
     try:
-        import urllib.request as _urllib_request
+        import http.client
         action = "complete your registration" if purpose == "register" else "log in to your account"
         html = f"""
         <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px;background:#0f0f1a;color:#fff;border-radius:12px;">
@@ -112,18 +112,15 @@ def send_email_code(to_email: str, code: str, purpose: str = "verification") -> 
             "subject": f"GlobalTalk — Your {'verification' if purpose == 'register' else 'login'} code",
             "htmlContent": html
         }).encode("utf-8")
-        req = _urllib_request.Request(
-            "https://api.brevo.com/v3/smtp/email",
-            data=payload,
-            headers={
-                "api-key": BREVO_API_KEY,
-                "Content-Type": "application/json",
-                "Accept": "application/json"
-            },
-            method="POST"
-        )
-        with _urllib_request.urlopen(req, timeout=10) as resp:
-            logger.info(f"Brevo response: {resp.status}")
+        conn = http.client.HTTPSConnection("api.brevo.com", timeout=10)
+        conn.request("POST", "/v3/smtp/email", body=payload, headers={
+            "api-key": BREVO_API_KEY,
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        })
+        resp = conn.getresponse()
+        logger.info(f"Brevo response: {resp.status}")
+        conn.close()
         return True
     except Exception as e:
         logger.error(f"Email send failed: {e}")
