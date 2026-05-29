@@ -768,7 +768,7 @@ async function init(){
 
   // Init Socket.IO
   try{
-    socket=io('https://haaa-anfb.onrender.com',{transports:['websocket','polling']});
+   socket=io('https://haaa-anfb.onrender.com',{transports:['polling']});
     socket.on('user_joined',d=>{if(d.roomId===currentRoom?.id)pushSystemMessage(`${d.user} joined`);});
     socket.on('user_left',d=>{if(d.roomId===currentRoom?.id)pushSystemMessage(`${d.user} left`);});
     socket.on('invite_received',d=>{if(d.targetUser===currentUser?.dbKey)showInviteToast(d);});
