@@ -14,6 +14,11 @@ import string
 import random
 import time
 import logging
+import json
+import smtplib
+import re
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from functools import wraps
 from dotenv import load_dotenv  # type: ignore
 
@@ -43,8 +48,6 @@ limiter = Limiter(
 )
 
 # ── Firebase init ──────────────────────────────────────────────────────────────
-import json
-
 FIREBASE_DB_URL = os.environ.get(
     "FIREBASE_DB_URL",
     "https://global-chat-cfe60-default-rtdb.firebaseio.com",
@@ -58,16 +61,20 @@ try:
         cred = credentials.Certificate(cred_dict)
     else:
         cred = credentials.Certificate("serviceAccountKey.json")
-
     firebase_admin.initialize_app(cred, {"databaseURL": FIREBASE_DB_URL})
     _firebase_ready = True
     logger.info("Firebase Admin SDK initialised.")
 except Exception as e:
     logger.warning(f"Firebase Admin SDK not initialised (running without it): {e}")
 
-    
+# ── Email config ───────────────────────────────────────────────────────────────
+GMAIL_USER = os.environ.get("GMAIL_USER", "")
+GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 SHORT_ID_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+CODE_EXPIRY_SECONDS = 600  # 10 minutes
+REMEMBER_DEVICE_DAYS = 15
 
 
 def gen_short_id(length: int = 6) -> str:
@@ -76,6 +83,47 @@ def gen_short_id(length: int = 6) -> str:
 
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
+
+
+def gen_verification_code() -> str:
+    return str(random.randint(100000, 999999))
+
+
+def is_valid_email(email: str) -> bool:
+    return bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email))
+
+
+def send_email_code(to_email: str, code: str, purpose: str = "verification") -> bool:
+    if not GMAIL_USER or not GMAIL_APP_PASSWORD:
+        logger.warning("Gmail credentials not configured")
+        return False
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"GlobalTalk — Your {'verification' if purpose == 'register' else 'login'} code"
+        msg["From"] = f"GlobalTalk <{GMAIL_USER}>"
+        msg["To"] = to_email
+
+        action = "complete your registration" if purpose == "register" else "log in to your account"
+        html = f"""
+        <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px;background:#0f0f1a;color:#fff;border-radius:12px;">
+            <h2 style="color:#6c63ff;margin-bottom:8px;">GlobalTalk</h2>
+            <p style="color:#aaa;margin-bottom:24px;">Your verification code to {action}:</p>
+            <div style="background:#1a1a2e;border:2px solid #6c63ff;border-radius:10px;padding:24px;text-align:center;margin-bottom:24px;">
+                <span style="font-size:40px;font-weight:bold;letter-spacing:12px;color:#fff;">{code}</span>
+            </div>
+            <p style="color:#aaa;font-size:13px;">This code expires in <strong style="color:#fff;">10 minutes</strong>.</p>
+            <p style="color:#555;font-size:12px;margin-top:24px;">If you didn't request this, ignore this email.</p>
+        </div>
+        """
+        msg.attach(MIMEText(html, "html"))
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
+            server.sendmail(GMAIL_USER, to_email, msg.as_string())
+        return True
+    except Exception as e:
+        logger.error(f"Email send failed: {e}")
+        return False
 
 
 def require_firebase(f):
@@ -88,13 +136,12 @@ def require_firebase(f):
 
 
 def fb_get(path: str):
-    """Fetch a Firebase path and always return a plain dict or None."""
     raw = firebase_db.reference(path).get()
     if raw is None:
         return None
     if isinstance(raw, dict):
         return raw
-    return dict(raw)  # fallback — should never happen for object nodes
+    return dict(raw)
 
 
 def fb_get_or_empty(path: str) -> dict:
@@ -107,13 +154,65 @@ def health():
     return jsonify({"status": "ok", "firebase": _firebase_ready, "ts": int(time.time())})
 
 
-# ── Auth ───────────────────────────────────────────────────────────────────────
+# ── Auth: Send verification code ───────────────────────────────────────────────
+@app.route("/api/auth/send-code", methods=["POST"])
+@limiter.limit("5 per minute")
+@require_firebase
+def send_code():
+    data: dict = request.get_json(silent=True) or {}
+    purpose: str = data.get("purpose", "register")  # "register" or "login"
+    email: str = data.get("email", "").strip().lower()
+    username: str = data.get("username", "").strip().lower()
+
+    if not email or not is_valid_email(email):
+        return jsonify({"error": "Valid email required"}), 400
+
+    if purpose == "register":
+        if not username or len(username) < 2:
+            return jsonify({"error": "Username required"}), 400
+        existing = fb_get(f"users/{username}")
+        if existing:
+            return jsonify({"error": "Username already taken"}), 409
+        email_exists = fb_get(f"email_index/{email.replace('.', ',')}")
+        if email_exists:
+            return jsonify({"error": "Email already registered"}), 409
+
+    elif purpose == "login":
+        if not username:
+            return jsonify({"error": "Username required"}), 400
+        user = fb_get(f"users/{username}")
+        if not user:
+            return jsonify({"error": "Account not found"}), 404
+        if user.get("email", "").lower() != email:
+            return jsonify({"error": "Email does not match account"}), 401
+
+    code = gen_verification_code()
+    expires_at = int(time.time()) + CODE_EXPIRY_SECONDS
+
+    firebase_db.reference(f"verification_codes/{username}").set({
+        "code": code,
+        "email": email,
+        "purpose": purpose,
+        "expiresAt": expires_at,
+    })
+
+    sent = send_email_code(email, code, purpose)
+    if not sent:
+        return jsonify({"error": "Failed to send email. Check server config."}), 500
+
+    return jsonify({"message": "Code sent to email"}), 200
+
+
+# ── Auth: Register ─────────────────────────────────────────────────────────────
 @app.route("/api/auth/register", methods=["POST"])
 @limiter.limit("10 per minute")
+@require_firebase
 def register():
     data: dict = request.get_json(silent=True) or {}
     username: str = data.get("username", "").strip()
     password: str = data.get("password", "")
+    email: str = data.get("email", "").strip().lower()
+    code: str = data.get("code", "").strip()
     lang: str = data.get("lang", "English")
     avatar_emoji: str = data.get("avatarEmoji", "😎")
     avatar_url = data.get("avatarUrl")
@@ -124,9 +223,20 @@ def register():
         return jsonify({"error": "Invalid username characters"}), 400
     if len(password) < 6:
         return jsonify({"error": "Password must be at least 6 characters"}), 400
+    if not email or not is_valid_email(email):
+        return jsonify({"error": "Valid email required"}), 400
+    if not code:
+        return jsonify({"error": "Verification code required"}), 400
 
-    if not _firebase_ready:
-        return jsonify({"error": "Firebase not configured"}), 503
+    stored = fb_get(f"verification_codes/{username.lower()}")
+    if not stored:
+        return jsonify({"error": "No verification code found. Request a new one."}), 400
+    if stored.get("code") != code:
+        return jsonify({"error": "Invalid verification code"}), 401
+    if int(time.time()) > stored.get("expiresAt", 0):
+        return jsonify({"error": "Code expired. Request a new one."}), 401
+    if stored.get("purpose") != "register":
+        return jsonify({"error": "Invalid code purpose"}), 400
 
     existing = fb_get(f"users/{username.lower()}")
     if existing:
@@ -141,6 +251,7 @@ def register():
 
     firebase_db.reference(f"users/{username.lower()}").set({
         "name": username,
+        "email": email,
         "lang": lang,
         "flag": LANG_FLAGS.get(lang, "🌐"),
         "color": _string_to_color(username),
@@ -149,26 +260,73 @@ def register():
         "avatarUrl": avatar_url,
         "createdAt": {".sv": "timestamp"},
     })
+
+    firebase_db.reference(f"email_index/{email.replace('.', ',')}").set({"username": username.lower()})
+    firebase_db.reference(f"verification_codes/{username.lower()}").delete()
+
     return jsonify({"message": "Account created"}), 201
 
 
+# ── Auth: Login ────────────────────────────────────────────────────────────────
 @app.route("/api/auth/login", methods=["POST"])
 @limiter.limit("20 per minute")
+@require_firebase
 def login():
     data: dict = request.get_json(silent=True) or {}
     username: str = data.get("username", "").strip()
     password: str = data.get("password", "")
+    code: str = data.get("code", "").strip()
+    device_token: str = data.get("deviceToken", "").strip()
 
     if not username or not password:
         return jsonify({"error": "Username and password required"}), 400
-    if not _firebase_ready:
-        return jsonify({"error": "Firebase not configured"}), 503
 
     user: dict = fb_get(f"users/{username.lower()}") or {}
     if not user:
         return jsonify({"error": "Account not found"}), 404
     if user.get("passHash") != hash_password(password):
         return jsonify({"error": "Wrong password"}), 401
+
+    # Check remembered device
+    if device_token:
+        stored_token = fb_get(f"device_tokens/{username.lower()}/{_hash_token(device_token)}")
+        if stored_token and int(time.time()) < stored_token.get("expiresAt", 0):
+            return jsonify({
+                "name": user.get("name", username),
+                "lang": user.get("lang", "English"),
+                "flag": user.get("flag", "🌐"),
+                "color": user.get("color", "#6c63ff"),
+                "avatarEmoji": user.get("avatarEmoji"),
+                "avatarUrl": user.get("avatarUrl"),
+                "dbKey": username.lower(),
+                "requiresCode": False,
+            })
+
+    # No valid device token — need email code
+    if not code:
+        return jsonify({"requiresCode": True, "message": "Email verification required"}), 206
+
+    stored = fb_get(f"verification_codes/{username.lower()}")
+    if not stored:
+        return jsonify({"error": "No verification code found. Request a new one."}), 400
+    if stored.get("code") != code:
+        return jsonify({"error": "Invalid verification code"}), 401
+    if int(time.time()) > stored.get("expiresAt", 0):
+        return jsonify({"error": "Code expired. Request a new one."}), 401
+    if stored.get("purpose") != "login":
+        return jsonify({"error": "Invalid code purpose"}), 400
+
+    firebase_db.reference(f"verification_codes/{username.lower()}").delete()
+
+    # Handle remember device
+    new_device_token = None
+    if data.get("rememberDevice"):
+        new_device_token = _gen_device_token()
+        expires_at = int(time.time()) + (REMEMBER_DEVICE_DAYS * 86400)
+        firebase_db.reference(f"device_tokens/{username.lower()}/{_hash_token(new_device_token)}").set({
+            "expiresAt": expires_at,
+            "createdAt": {".sv": "timestamp"},
+        })
 
     return jsonify({
         "name": user.get("name", username),
@@ -178,7 +336,17 @@ def login():
         "avatarEmoji": user.get("avatarEmoji"),
         "avatarUrl": user.get("avatarUrl"),
         "dbKey": username.lower(),
+        "requiresCode": False,
+        "deviceToken": new_device_token,
     })
+
+
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()[:32]
+
+
+def _gen_device_token() -> str:
+    return "".join(random.choices(string.ascii_letters + string.digits, k=48))
 
 
 # ── Rooms ──────────────────────────────────────────────────────────────────────
@@ -348,7 +516,6 @@ def poll_invites():
             continue
         if inv.get("timestamp", 0) >= since:
             results.append({**inv, "_key": key})
-            # consume it
             firebase_db.reference(f"invites/{user_key}/pending/{key}").delete()
     return jsonify(results)
 

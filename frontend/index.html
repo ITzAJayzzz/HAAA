@@ -1,8 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GlobalTalk — Chat Without Borders</title>
@@ -365,15 +363,21 @@
         <input class="inp" type="password" id="loginPass" placeholder="Your password" autocomplete="current-password"/>
         <button class="pass-toggle" type="button" onclick="togglePass('loginPass',this)">👁</button>
       </div>
-      <div class="field-group">
-        <div class="field-label">Verify you're human</div>
-        <div class="captcha-box">
-          <span class="captcha-question" id="loginCaptchaQ"></span>
-          <input class="captcha-inp" type="number" id="loginCaptchaA" placeholder="Answer…" autocomplete="off"/>
-          <button class="captcha-refresh" onclick="genCaptcha('login')" title="New question">🔄</button>
+      <div class="field-group"><div class="field-label">Email</div><input class="inp" type="email" id="loginEmail" placeholder="Your registered email" autocomplete="email"/></div>
+      <!-- Code step (shown after password check) -->
+      <div id="loginCodeStep" style="display:none;">
+        <div class="field-group">
+          <div class="field-label">Verification Code</div>
+          <input class="inp" type="text" id="loginCode" placeholder="Enter 6-digit code" maxlength="6" autocomplete="one-time-code"/>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:6px;">Check your email for the code. Expires in 10 minutes.</div>
+        </div>
+        <div class="field-group" style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+          <input type="checkbox" id="rememberDevice" style="width:16px;height:16px;accent-color:var(--accent);cursor:pointer;"/>
+          <label for="rememberDevice" style="font-size:13px;color:var(--text-muted);cursor:pointer;">Remember this device for 15 days</label>
         </div>
       </div>
       <button class="btn" id="loginBtn" onclick="doLogin()">Sign In →</button>
+      <button class="btn btn-ghost" id="resendLoginCode" style="display:none;margin-top:8px;" onclick="resendCode('login')">Resend Code</button>
     </div>
 
     <!-- REGISTER -->
@@ -409,15 +413,17 @@
         <div class="avatar-grid" id="regAvatarGrid"></div>
         <label class="avatar-upload-btn">📁 Upload custom image<input type="file" accept="image/*" style="display:none" onchange="handleAvatarUpload(this,'reg')"/></label>
       </div>
-      <div class="field-group">
-        <div class="field-label">Verify you're human</div>
-        <div class="captcha-box">
-          <span class="captcha-question" id="regCaptchaQ"></span>
-          <input class="captcha-inp" type="number" id="regCaptchaA" placeholder="Answer…" autocomplete="off"/>
-          <button class="captcha-refresh" onclick="genCaptcha('reg')" title="New question">🔄</button>
+      <div class="field-group"><div class="field-label">Email</div><input class="inp" type="email" id="regEmail" placeholder="Your email address" autocomplete="email"/></div>
+      <!-- Code step -->
+      <div id="regCodeStep" style="display:none;">
+        <div class="field-group">
+          <div class="field-label">Verification Code</div>
+          <input class="inp" type="text" id="regCode" placeholder="Enter 6-digit code" maxlength="6" autocomplete="one-time-code"/>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:6px;">Check your email for the code. Expires in 10 minutes.</div>
         </div>
       </div>
-      <button class="btn" id="registerBtn" onclick="doRegister()">Create Account →</button>
+      <button class="btn" id="registerBtn" onclick="doRegister()">Send Verification Code →</button>
+      <button class="btn btn-ghost" id="resendRegCode" style="display:none;margin-top:8px;" onclick="resendCode('register')">Resend Code</button>
     </div>
     <div class="backend-badge">🐍 Powered by Python Flask + Firebase Realtime DB</div>
   </div>
@@ -615,7 +621,8 @@
 <div class="emoji-picker" id="globalEmojiPicker"></div>
 
 <!-- Firebase SDKs (for real-time messaging) -->
-
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <!-- Socket.IO (for presence/room events from Flask) -->
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 
@@ -761,13 +768,13 @@ async function init(){
 
   // Init Socket.IO
   try{
-    socket=io('https://haaa-anfb.onrender.com',{transports:['websocket','polling']});
+    socket=io({transports:['websocket','polling']});
     socket.on('user_joined',d=>{if(d.roomId===currentRoom?.id)pushSystemMessage(`${d.user} joined`);});
     socket.on('user_left',d=>{if(d.roomId===currentRoom?.id)pushSystemMessage(`${d.user} left`);});
     socket.on('invite_received',d=>{if(d.targetUser===currentUser?.dbKey)showInviteToast(d);});
   }catch(e){console.warn('Socket.IO init failed:',e);}
 
-  buildRegAvatarGrid();genCaptcha('login');genCaptcha('reg');
+  buildRegAvatarGrid();
   showScreen('authScreen');
   setTimeout(()=>document.getElementById('loginUser').focus(),100);
 }
@@ -796,44 +803,123 @@ function buildRegAvatarGrid(){
 }
 
 // ── REGISTER ───────────────────────────────────────────────────
+let regCodeSent=false;
 async function doRegister(){
   clearAuthMsg();
   const username=document.getElementById('regUser').value.trim();
   const pass=document.getElementById('regPass').value;
   const passConfirm=document.getElementById('regPassConfirm').value;
   const lang=document.getElementById('regLang').value;
+  const email=document.getElementById('regEmail').value.trim();
   if(!username||username.length<2){showAuthErr('Username must be at least 2 characters.');return;}
   if(!/^[a-zA-Z0-9_\-\.]+$/.test(username)){showAuthErr('Username: letters, numbers, _ - . only');return;}
   if(pass.length<6){showAuthErr('Password must be at least 6 characters.');return;}
   if(pass!==passConfirm){showAuthErr('Passwords do not match.');return;}
-  if(!checkCaptcha('reg')){showAuthErr('Wrong CAPTCHA answer.');genCaptcha('reg');return;}
-  const btn=document.getElementById('registerBtn');btn.disabled=true;btn.textContent='Creating account…';
+  if(!email||!email.includes('@')){showAuthErr('Enter a valid email address.');return;}
+  const btn=document.getElementById('registerBtn');
+
+  // Step 1: send code
+  if(!regCodeSent){
+    btn.disabled=true;btn.textContent='Sending code…';
+    try{
+      await api('/api/auth/send-code','POST',{purpose:'register',email,username});
+      regCodeSent=true;
+      document.getElementById('regCodeStep').style.display='';
+      document.getElementById('resendRegCode').style.display='';
+      btn.textContent='Create Account →';
+      showAuthOk('Code sent! Check your email.');
+    }catch(err){showAuthErr(err.message);btn.textContent='Send Verification Code →';}
+    finally{btn.disabled=false;}
+    return;
+  }
+
+  // Step 2: verify code + create account
+  const code=document.getElementById('regCode').value.trim();
+  if(!code||code.length!==6){showAuthErr('Enter the 6-digit code from your email.');return;}
+  btn.disabled=true;btn.textContent='Creating account…';
   try{
-    await api('/api/auth/register','POST',{username,password:pass,lang,avatarEmoji:regAvatarEmoji||BUILTIN_AVATARS[0],avatarUrl:regAvatarDataUrl||null});
-    showAuthOk('Account created! You can now sign in.');switchTab('login');document.getElementById('loginUser').value=username;
+    await api('/api/auth/register','POST',{username,password:pass,email,code,lang,avatarEmoji:regAvatarEmoji||BUILTIN_AVATARS[0],avatarUrl:regAvatarDataUrl||null});
+    regCodeSent=false;
+    document.getElementById('regCodeStep').style.display='none';
+    document.getElementById('resendRegCode').style.display='none';
+    showAuthOk('Account created! You can now sign in.');
+    switchTab('login');document.getElementById('loginUser').value=username;
   }catch(err){showAuthErr(err.message);}
   finally{btn.disabled=false;btn.textContent='Create Account →';}
 }
 
 // ── LOGIN ──────────────────────────────────────────────────────
+let loginCodeSent=false;
 async function doLogin(){
   clearAuthMsg();
   const username=document.getElementById('loginUser').value.trim();
   const pass=document.getElementById('loginPass').value;
+  const email=document.getElementById('loginEmail').value.trim();
   if(!username){showAuthErr('Enter your username.');return;}
   if(!pass){showAuthErr('Enter your password.');return;}
-  if(!checkCaptcha('login')){showAuthErr('Wrong CAPTCHA answer.');genCaptcha('login');return;}
-  const btn=document.getElementById('loginBtn');btn.disabled=true;btn.textContent='Signing in…';
+  if(!email||!email.includes('@')){showAuthErr('Enter your registered email.');return;}
+  const btn=document.getElementById('loginBtn');
+
+  // Check remembered device
+  const deviceToken=localStorage.getItem('deviceToken_'+username);
+
+  // If code already sent, verify it
+  if(loginCodeSent){
+    const code=document.getElementById('loginCode').value.trim();
+    if(!code||code.length!==6){showAuthErr('Enter the 6-digit code from your email.');return;}
+    btn.disabled=true;btn.textContent='Verifying…';
+    try{
+      const rememberDevice=document.getElementById('rememberDevice').checked;
+      const user=await api('/api/auth/login','POST',{username,password:pass,email,code,rememberDevice,deviceToken:deviceToken||''});
+      if(user.deviceToken){localStorage.setItem('deviceToken_'+username,user.deviceToken);}
+      loginCodeSent=false;
+      document.getElementById('loginCodeStep').style.display='none';
+      document.getElementById('resendLoginCode').style.display='none';
+      currentUser={...user};
+      refreshUserUI();startInvitePolling();showScreen('lobbyScreen');startLobby();
+    }catch(err){showAuthErr(err.message);}
+    finally{btn.disabled=false;btn.textContent='Sign In →';}
+    return;
+  }
+
+  btn.disabled=true;btn.textContent='Signing in…';
   try{
-    const user=await api('/api/auth/login','POST',{username,password:pass});
-    currentUser={...user};
-    refreshUserUI();startInvitePolling();showScreen('lobbyScreen');startLobby();
-  }catch(err){showAuthErr(err.message);genCaptcha('login');}
-  finally{btn.disabled=false;btn.textContent='Sign In →';}
+    // First attempt with device token (skip code if remembered)
+    const res=await api('/api/auth/login','POST',{username,password:pass,email,deviceToken:deviceToken||''});
+    if(res.requiresCode){
+      // Need email code
+      await api('/api/auth/send-code','POST',{purpose:'login',email,username});
+      loginCodeSent=true;
+      document.getElementById('loginCodeStep').style.display='';
+      document.getElementById('resendLoginCode').style.display='';
+      btn.textContent='Sign In →';
+      showAuthOk('Code sent! Check your email.');
+    } else {
+      if(res.deviceToken){localStorage.setItem('deviceToken_'+username,res.deviceToken);}
+      currentUser={...res};
+      refreshUserUI();startInvitePolling();showScreen('lobbyScreen');startLobby();
+    }
+  }catch(err){showAuthErr(err.message);}
+  finally{btn.disabled=false;}
+}
+
+async function resendCode(purpose){
+  clearAuthMsg();
+  const username=purpose==='login'?document.getElementById('loginUser').value.trim():document.getElementById('regUser').value.trim();
+  const email=purpose==='login'?document.getElementById('loginEmail').value.trim():document.getElementById('regEmail').value.trim();
+  try{
+    await api('/api/auth/send-code','POST',{purpose,email,username});
+    showAuthOk('New code sent! Check your email.');
+  }catch(err){showAuthErr(err.message);}
 }
 function doLogout(){
   stopInvitePolling();stopLobby();currentUser=null;
-  showScreen('authScreen');switchTab('login');document.getElementById('loginPass').value='';genCaptcha('login');
+  loginCodeSent=false;regCodeSent=false;
+  document.getElementById('loginCodeStep').style.display='none';
+  document.getElementById('resendLoginCode').style.display='none';
+  document.getElementById('regCodeStep').style.display='none';
+  document.getElementById('resendRegCode').style.display='none';
+  showScreen('authScreen');switchTab('login');document.getElementById('loginPass').value='';
 }
 
 // ── REFRESH UI ─────────────────────────────────────────────────
@@ -1246,11 +1332,7 @@ window.addEventListener('load',()=>{buildEmojiPicker();init();});
 </script>
 
 <!-- Firebase SDKs (real-time DB only) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 </body>
 </html>
-
-
-
-
-
-
