@@ -1,4 +1,3 @@
-
 from flask import Flask, request, jsonify, send_from_directory
 from flask_socketio import SocketIO, emit, join_room, leave_room  # type: ignore
 from flask_cors import CORS  # type: ignore
@@ -198,9 +197,8 @@ def send_code():
         "expiresAt": expires_at,
     })
 
-    sent = send_email_code(email, code, purpose)
-    if not sent:
-        return jsonify({"error": "Failed to send email. Check server config."}), 500
+    import threading
+    threading.Thread(target=send_email_code, args=(email, code, purpose), daemon=True).start()
 
     return jsonify({"message": "Code sent to email"}), 200
 
