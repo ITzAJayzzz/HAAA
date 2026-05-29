@@ -1,6 +1,3 @@
-from gevent import monkey
-monkey.patch_all()
-
 from flask import Flask, request, jsonify, send_from_directory
 from flask_socketio import SocketIO, emit, join_room, leave_room  # type: ignore
 from flask_cors import CORS  # type: ignore
@@ -15,10 +12,7 @@ import random
 import time
 import logging
 import json
-import smtplib
 import re
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from functools import wraps
 from dotenv import load_dotenv  # type: ignore
 
@@ -35,7 +29,7 @@ CORS(app, resources={r"/api/*": {"origins": os.environ.get("ALLOWED_ORIGINS", "*
 socketio = SocketIO(
     app,
     cors_allowed_origins=os.environ.get("ALLOWED_ORIGINS", "*"),
-    async_mode="gevent",
+    async_mode="threading",
     logger=False,
     engineio_logger=False,
 )
@@ -68,8 +62,9 @@ except Exception as e:
     logger.warning(f"Firebase Admin SDK not initialised (running without it): {e}")
 
 # ── Email config ───────────────────────────────────────────────────────────────
-GMAIL_USER = os.environ.get("GMAIL_USER", "")
-GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
+BREVO_API_KEY = os.environ.get("BREVO_API_KEY", "")
+SENDER_EMAIL = os.environ.get("SENDER_EMAIL", "")
+SENDER_NAME = os.environ.get("SENDER_NAME", "GlobalTalk")
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 SHORT_ID_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -94,15 +89,11 @@ def is_valid_email(email: str) -> bool:
 
 
 def send_email_code(to_email: str, code: str, purpose: str = "verification") -> bool:
-    if not GMAIL_USER or not GMAIL_APP_PASSWORD:
-        logger.warning("Gmail credentials not configured")
+    if not BREVO_API_KEY or not SENDER_EMAIL:
+        logger.warning("Brevo credentials not configured")
         return False
     try:
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = f"GlobalTalk — Your {'verification' if purpose == 'register' else 'login'} code"
-        msg["From"] = f"GlobalTalk <{GMAIL_USER}>"
-        msg["To"] = to_email
-
+        import urllib.request as _urllib_request
         action = "complete your registration" if purpose == "register" else "log in to your account"
         html = f"""
         <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px;background:#0f0f1a;color:#fff;border-radius:12px;">
@@ -115,11 +106,24 @@ def send_email_code(to_email: str, code: str, purpose: str = "verification") -> 
             <p style="color:#555;font-size:12px;margin-top:24px;">If you didn't request this, ignore this email.</p>
         </div>
         """
-        msg.attach(MIMEText(html, "html"))
-
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
-            server.sendmail(GMAIL_USER, to_email, msg.as_string())
+        payload = json.dumps({
+            "sender": {"name": SENDER_NAME, "email": SENDER_EMAIL},
+            "to": [{"email": to_email}],
+            "subject": f"GlobalTalk — Your {'verification' if purpose == 'register' else 'login'} code",
+            "htmlContent": html
+        }).encode("utf-8")
+        req = _urllib_request.Request(
+            "https://api.brevo.com/v3/smtp/email",
+            data=payload,
+            headers={
+                "api-key": BREVO_API_KEY,
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            },
+            method="POST"
+        )
+        with _urllib_request.urlopen(req, timeout=10) as resp:
+            logger.info(f"Brevo response: {resp.status}")
         return True
     except Exception as e:
         logger.error(f"Email send failed: {e}")
