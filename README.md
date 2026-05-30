@@ -171,7 +171,7 @@ python app.py
 
 ---
 
-## ☁️ AWS Deployment (Terraform — Optional)
+## ☁️ AWS Deployment
 
 If you want to deploy on your own AWS EC2 server instead of Render:
 
