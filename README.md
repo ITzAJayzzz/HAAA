@@ -39,11 +39,6 @@ globaltalk/
 │   └── index.html           ← Single-page app
 ├── nginx/
 │   └── nginx.conf
-├── terraform/
-│   ├── main.tf              ← AWS EC2 infra (optional)
-│   ├── variables.tf
-│   ├── outputs.tf
-│   └── user_data.sh.tpl
 ├── docker-compose.yml
 ├── setup.sh
 ├── run.sh
@@ -169,43 +164,6 @@ python app.py
 # App runs at http://localhost:5000
 ```
 
----
-
-## ☁️ AWS Deployment
-
-If you want to deploy on your own AWS EC2 server instead of Render:
-
-### Prerequisites
-- AWS account with credentials configured
-- Terraform installed
-- SSH key pair
-
-### Deploy
-
-```bash
-cd terraform
-terraform init
-terraform plan -var="ssh_public_key_path=~/.ssh/id_rsa.pub"
-terraform apply -var="ssh_public_key_path=~/.ssh/id_rsa.pub"
-```
-
-### Upload app to server
-
-```bash
-SERVER_IP=$(terraform output -raw public_ip)
-scp -r ../backend ../frontend ../nginx ../docker-compose.yml ubuntu@$SERVER_IP:/opt/globaltalk/
-ssh ubuntu@$SERVER_IP
-cd /opt/globaltalk
-docker-compose up -d
-```
-
-### Destroy
-
-```bash
-terraform destroy
-```
-
----
 
 ## 📦 Tech Stack
 
@@ -220,4 +178,3 @@ terraform destroy
 | Gunicorn | Production WSGI server |
 | Render | Backend hosting |
 | Vercel | Frontend hosting |
-| Terraform | Optional AWS infrastructure |
