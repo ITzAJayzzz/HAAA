@@ -589,7 +589,19 @@ def on_leave_room(data: dict):
     leave_room(room_id)
     emit("user_left", {"user": user_name, "roomId": room_id}, to=room_id)
 
+    # Delete room if empty and not permanent
+    if _firebase_ready and room_id:
+        try:
+            room = fb_get(f"rooms/{room_id}")
+            if room and not room.get("permanent", False):
+                members = socketio.server.manager.get_participants("/", room_id)
+                if not list(members):
+                    firebase_db.reference(f"rooms/{room_id}").delete()
+                    logger.info(f"Deleted empty temporary room: {room_id}")
+        except Exception as e:
+            logger.warning(f"Room cleanup error: {e}")
 
+            
 @socketio.on("new_message")
 def on_new_message(data: dict):
     room_id: str = data.get("roomId", "global")
