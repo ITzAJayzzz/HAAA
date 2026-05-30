@@ -1,14 +1,31 @@
 # 🌐 GlobalTalk — Full Stack
 
-Real-time multilingual chat app.  
+Real-time multilingual chat app with email verification and auto-translation.
+
 **Backend:** Python Flask + Flask-SocketIO  
 **Frontend:** Vanilla HTML/CSS/JS  
 **Database:** Firebase Realtime Database  
-**Infra:** Docker + Nginx + Terraform (AWS)
+**Email:** Brevo API  
+**Deployed:** Render (backend) + Vercel (frontend)  
+**Infra (optional):** Terraform (AWS EC2)
 
 ---
 
-## Project Structure
+## ✨ Features
+
+- 🔐 Email verification on register and login
+- 📱 Remember device for 15 days
+- 💬 Real-time chat via Socket.IO
+- 🌍 Auto-translation between 12 languages
+- 🏠 Public and private password-protected rooms
+- ⏱️ Temporary rooms auto-delete when empty
+- 📨 Room invites between users
+- 😀 Message reactions
+- 🔒 Rate limiting and CORS protection
+
+---
+
+## 📁 Project Structure
 
 ```
 globaltalk/
@@ -17,133 +34,168 @@ globaltalk/
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   ├── .env.example
-│   └── serviceAccountKey.json  ← YOU ADD THIS
+│   └── serviceAccountKey.json  ← YOU ADD THIS (not committed)
 ├── frontend/
 │   └── index.html           ← Single-page app
 ├── nginx/
 │   └── nginx.conf
 ├── terraform/
-│   ├── main.tf              ← AWS EC2 infra
+│   ├── main.tf              ← AWS EC2 infra (optional)
 │   ├── variables.tf
 │   ├── outputs.tf
 │   └── user_data.sh.tpl
 ├── docker-compose.yml
-├── setup.sh                 ← Local dev setup
-├── run.sh                   ← Start dev server
+├── setup.sh
+├── run.sh
 └── README.md
 ```
 
 ---
 
-## 🔑 Prerequisites
+## 🚀 Live Deployment
 
-1. **Firebase project** — you need:
-   - A Firebase Realtime Database enabled
-   - A service account key (`serviceAccountKey.json`)
-   - Download from: Firebase Console → Project Settings → Service Accounts → Generate new private key
-
-2. **Python 3.10+**
+| Service | Platform | URL |
+|---------|----------|-----|
+| Backend | Render | `https://haaa-anfb.onrender.com` |
+| Frontend | Vercel | `https://gchatsss.vercel.app` |
 
 ---
 
-## 🚀 Local Development
+## 🔑 Environment Variables
 
-### 1. Install dependencies
+### Backend (Render)
+
+| Key | Description |
+|-----|-------------|
+| `SECRET_KEY` | Flask secret key |
+| `FIREBASE_DB_URL` | Firebase Realtime Database URL |
+| `FIREBASE_CRED_JSON` | Firebase service account JSON (full contents) |
+| `BREVO_API_KEY` | Brevo API key for sending emails |
+| `SENDER_EMAIL` | Email address to send verification codes from |
+| `SENDER_NAME` | Display name for sender (e.g. GlobalTalk) |
+| `ALLOWED_ORIGINS` | Allowed CORS origins (your Vercel URL) |
+| `FLASK_ENV` | `production` or `development` |
+
+---
+
+## 🔌 API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/health` | Server health check |
+| POST | `/api/auth/send-code` | Send email verification code |
+| POST | `/api/auth/register` | Create account (requires email code) |
+| POST | `/api/auth/login` | Sign in (requires email code if device not remembered) |
+| GET | `/api/rooms` | List all rooms |
+| POST | `/api/rooms` | Create a room |
+| DELETE | `/api/rooms/:id` | Delete a room (admin only) |
+| POST | `/api/rooms/join-private` | Join private room by short ID |
+| POST | `/api/translate` | Translate text (Google Translate proxy) |
+| POST | `/api/invites` | Send room invite to user |
+| GET | `/api/invites/poll` | Poll for pending invites |
+| GET | `/api/users/search?q=` | Search users |
+| PATCH | `/api/users/:dbKey` | Update profile |
+
+---
+
+## 🌍 Supported Languages
+
+English, Filipino, Spanish, Japanese, French, Arabic, Hindi, Korean, Portuguese, German, Chinese, Italian
+
+---
+
+## 🔒 Security
+
+- Passwords are **SHA-256 hashed** before storage
+- Email **verification codes** expire after 10 minutes
+- **Device tokens** hashed before storing in Firebase
+- **Rate limiting** on all auth and sensitive endpoints
+- **CORS** restricted to Vercel frontend URL
+- Firebase service account key stored as environment variable (never in code)
+
+---
+
+## ⚡ Socket.IO Events
+
+| Event | Direction | Description |
+|-------|-----------|-------------|
+| `join_room` | Client → Server | Join a chat room |
+| `leave_room` | Client → Server | Leave a chat room |
+| `new_message` | Client → Server | Send a message |
+| `reaction` | Client → Server | Add reaction to message |
+| `typing` | Client → Server | Typing indicator |
+| `user_joined` | Server → Client | User joined notification |
+| `user_left` | Server → Client | User left notification |
+| `message_received` | Server → Client | New message broadcast |
+| `reaction_update` | Server → Client | Reaction update broadcast |
+| `user_typing` | Server → Client | Typing indicator broadcast |
+
+---
+
+## 🛠️ Local Development
+
+### 1. Clone the repo
 
 ```bash
-chmod +x setup.sh run.sh
-./setup.sh
+git clone https://github.com/ITzAJayzzz/HAAA.git
+cd HAAA
 ```
 
-This creates `backend/venv/` and installs all packages.
-
-### 2. Add your Firebase key
+### 2. Install backend dependencies
 
 ```bash
-# Copy your downloaded service account key
+cd backend
+pip install -r requirements.txt
+```
+
+### 3. Add your Firebase key
+
+```bash
 cp ~/Downloads/your-key.json backend/serviceAccountKey.json
 ```
 
-### 3. Configure environment
+### 4. Configure environment
 
 ```bash
-# backend/.env is already created by setup.sh
-# Edit if needed:
-nano backend/.env
+cp backend/.env.example backend/.env
+# Edit backend/.env with your values
 ```
 
-### 4. Run the server
+### 5. Run the server
 
 ```bash
-./run.sh
+cd backend
+python app.py
 # App runs at http://localhost:5000
 ```
 
-### Fix VSCode import squiggles
-
-Open VS Code **from the project root** so it picks up `.vscode/settings.json`:
-
-```bash
-code .
-```
-
-Then bottom-left of VSCode → click the Python version → select:
-`backend/venv/bin/python`
-
-The red underlines disappear immediately — they were just VSCode not knowing which Python environment to use.
-
 ---
 
-## 🐳 Docker (local full-stack)
+## ☁️ AWS Deployment (Terraform — Optional)
 
-```bash
-# Copy your Firebase key first
-cp ~/Downloads/your-key.json backend/serviceAccountKey.json
-cp backend/.env.example backend/.env
-
-# Build and run
-docker-compose up --build
-
-# App runs at http://localhost:80
-```
-
----
-
-## ☁️ AWS Deployment (Terraform)
+If you want to deploy on your own AWS EC2 server instead of Render:
 
 ### Prerequisites
-- AWS CLI configured (`aws configure`)
-- Terraform installed (`brew install terraform` / `apt install terraform`)
+- AWS account with credentials configured
+- Terraform installed
 - SSH key pair
 
 ### Deploy
 
 ```bash
 cd terraform
-
-# Initialize
 terraform init
-
-# Preview
 terraform plan -var="ssh_public_key_path=~/.ssh/id_rsa.pub"
-
-# Apply
 terraform apply -var="ssh_public_key_path=~/.ssh/id_rsa.pub"
 ```
 
 ### Upload app to server
 
 ```bash
-# Get server IP from Terraform output
 SERVER_IP=$(terraform output -raw public_ip)
-
-# Copy project files
 scp -r ../backend ../frontend ../nginx ../docker-compose.yml ubuntu@$SERVER_IP:/opt/globaltalk/
-
-# SSH in and start
 ssh ubuntu@$SERVER_IP
 cd /opt/globaltalk
-cp backend/serviceAccountKey.json .  # upload your key first
 docker-compose up -d
 ```
 
@@ -155,28 +207,17 @@ terraform destroy
 
 ---
 
-## 🔌 API Endpoints
+## 📦 Tech Stack
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/health` | Server health check |
-| POST | `/api/auth/register` | Create account |
-| POST | `/api/auth/login` | Sign in |
-| GET | `/api/rooms` | List all rooms |
-| POST | `/api/rooms` | Create a room |
-| DELETE | `/api/rooms/:id` | Delete a room (admin only) |
-| POST | `/api/rooms/join-private` | Join private room by ID |
-| POST | `/api/translate` | Translate text via proxy |
-| POST | `/api/invites` | Send room invite |
-| GET | `/api/users/search?q=` | Search users |
-| PATCH | `/api/users/:dbKey` | Update profile |
-
----
-
-## 🔒 Security Notes
-
-- Passwords are SHA-256 hashed before storage
-- Rate limiting on all auth and sensitive endpoints
-- CORS restricted to `ALLOWED_ORIGINS` env var
-- Firebase service account key is never exposed to the frontend
-- SSH access in Terraform defaults to open — **set `ssh_allowed_cidr` to your IP** in production
+| Technology | Purpose |
+|------------|---------|
+| Python Flask | Backend web framework |
+| Flask-SocketIO | Real-time WebSocket events |
+| Firebase Realtime DB | Stores users, rooms, messages |
+| Firebase Admin SDK | Server-side Firebase access |
+| Brevo API | Sends verification emails |
+| Google Translate API | Free translation proxy |
+| Gunicorn | Production WSGI server |
+| Render | Backend hosting |
+| Vercel | Frontend hosting |
+| Terraform | Optional AWS infrastructure |
